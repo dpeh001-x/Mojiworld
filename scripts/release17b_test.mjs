@@ -146,7 +146,7 @@ for (const [W, H] of [[844, 390], [932, 430]]) {
     window.__close(); await sleep(200); try { openMultiplayer(); } catch (e) {} await sleep(400); o.help = /tap CHAT to type/.test(document.body.innerText) && !/press Enter to type/.test(document.body.innerText);
     window.__close(); o.tour = _tutTouchify('<kbd>Y</kbd> then click the tab');
     const seen = []; const st = window.showToast; window.showToast = function (m) { seen.push(String(m)); return st.apply(this, arguments); };
-    player.skillPoints = (player.skillPoints | 0) + 2; await sleep(1300); window.showToast = st; o.toast = seen.find((t) => /Ability Point/.test(t)) || seen.join('|');
+    player.skillPoints = (player.skillPoints | 0) + 2; await sleep(1300); window.showToast = st; o.toast = seen.find((t) => /^\+\d+ SP\b/.test(t)) || seen.join('|');
     const src = await (await fetch(location.href.split('?')[0])).text(); o.plg = src.includes("'<kbd>TAP</kbd> to continue'"); o.dash = src.includes("'double-tap ◀ or ▶'");
     return o; });
   ok(`6a. ${tag}: LV UP dial says tap`, /^tap to invest/.test(W6.dial || ''), W6.dial);
@@ -155,7 +155,7 @@ for (const [W, H] of [[844, 390], [932, 430]]) {
   ok(`6d. ${tag}: the taxi brief says Tap a node`, /^Tap a node/.test(W6.taxi), W6.taxi);
   ok(`6e. ${tag}: co-op chat help names CHAT, not Enter`, W6.help === true, W6.help);
   ok(`6f. ${tag}: the tour names MOJIDEX and taps`, /MOJIDEX/.test(W6.tour) && /tap the tab/.test(W6.tour), W6.tour);
-  ok(`6g. ${tag}: the Ability Point toast names LV UP (no book button)`, /tap LV UP to spend/.test(W6.toast), W6.toast);
+  ok(`6g. ${tag}: the SP toast names LV UP (no book button)`, /tap LV UP to spend/.test(W6.toast), W6.toast);
   ok(`6h. ${tag}: prologue hint and dash coach have touch words`, W6.plg && W6.dash, { plg: W6.plg, dash: W6.dash });
   await page.evaluate(() => { window.__close(); window.__beatDone = 0; player._storyBeatsSeen = {}; document.getElementById('story-beat-overlay').style.display = ''; _playStoryBeat('tutorial_intro', () => { window.__beatDone = 1; }); }); await page.waitForTimeout(1200);
   const S6 = await page.evaluate(() => { const b = document.getElementById('story-beat-skip'), h = document.getElementById('story-beat-hint'); const r = b && b.getClientRects().length && getComputedStyle(b).display !== 'none' ? b.getBoundingClientRect() : null;
