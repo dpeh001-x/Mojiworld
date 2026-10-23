@@ -16484,7 +16484,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1878';
+const GAME_VERSION = 'v0.30.1879';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -60399,6 +60399,7 @@ const net = {
   chatOpen: false,
   _lastTickAt: 0,
   _reconnectTries: 0,
+  _everWelcomed: false,   // fix-mp-joinfail - set by 'welcome', cleared by a fresh join / Leave: a join that never got one is not a lost connection
   _lastUrl: null,
   // v0.27.0 — co-op host authority. isHost defaults true so the solo/host path
   // (local monster simulation) is the norm until a lower-id peer appears.
@@ -61094,13 +61095,13 @@ function _mpScheduleReconnect() {
   if (net._reconnectTimer) return;             // one pending attempt at a time
   if ((net._reconnectTries | 0) >= LX_MP_RECONNECT_MAX) {   // v0.30.834 - stop asking: the relay is gone or refusing us. One button brings it back.
     net._reconnectTries = 0;
-    _mpStatus('Could not reconnect to your party.', '#ff8888');
-    _mpBanner('Could not reconnect to your party. Re-enter this map to play it solo.', 'bad', { retry: () => mpConnect(net._lastUrl, net._lastName, net._lastRoom) });
+    _mpStatus(net._everWelcomed ? 'Could not reconnect to your party.' : 'Could not join that party.', '#ff8888');   // fix-mp-joinfail
+    _mpBanner(net._everWelcomed ? 'Could not reconnect to your party. Re-enter this map to play it solo.' : 'Could not join that party - the server did not answer. Solo play is unaffected.', 'bad', { retry: () => mpConnect(net._lastUrl, net._lastName, net._lastRoom) });
     return;
   }
   const tries = (net._reconnectTries = (net._reconnectTries || 0) + 1);
   const delay = Math.min(15000, 1000 * Math.pow(2, tries - 1));
-  _mpStatus(`Reconnecting to your party… (try ${tries})`, '#ffcc66');
+  _mpStatus(`${net._everWelcomed ? 'Reconnecting to your' : 'Trying again to join your'} party… (try ${tries})`, '#ffcc66');
   net._reconnectTimer = setTimeout(() => {
     net._reconnectTimer = null;
     if (net._userClosed) return;
@@ -61155,6 +61156,7 @@ function mpConnect(url, name, room) {
   // shouldn't nag, so only a fresh run announces itself.
   if (!(net._reconnectTries > 0)) {
     _mpBannerMuted = false;   // fresh, user-initiated join — speak up again
+    net._everWelcomed = false;   // fix-mp-joinfail - a fresh join starts unwelcomed; an auto-reconnect keeps what its party told it
     _mpBanner('Joining party ' + baseRoom.toUpperCase() + '...', 'work', { dismiss: false });
   }
   let ws;
@@ -61289,12 +61291,12 @@ function mpConnect(url, name, room) {
     // deliberate hang-up doesn't loop. The re-sent hello re-joins the same
     // party code and re-runs host election, so co-op survives the drop.
     if (!net._userClosed) {
-      if (wasConnected) _mpPushLog('Connection lost — reconnecting…', 'sys');
+      if (wasConnected && net._everWelcomed) _mpPushLog('Connection lost — reconnecting…', 'sys');
       // v0.29.423 — a close BEFORE we ever opened is a failed JOIN, not a drop.
       // That is the case the menu flow swallowed completely.
-      if (!wasConnected && !(net._reconnectTries > 0)) {   // v0.30.1756 release20: a failed RE-connect attempt keeps "reconnecting..." (the status line counts the tries)
+      if (!net._everWelcomed) {   // fix-mp-joinfail - never joined: every dial so far failed (or opened and closed before 'welcome'). The auto-retries keep THIS banner and its Retry, never "connection lost" for a connection that never existed. A failed re-dial of a party we were IN keeps "reconnecting..." (v0.30.1756 release20; the status line counts the tries)
         _mpBanner('Could not join that party - the server refused the connection.', 'bad',
-                  { retry: () => mpConnect(url, name, room) });
+                  { retry: () => { if (net._reconnectTimer) { clearTimeout(net._reconnectTimer); net._reconnectTimer = null; } net._reconnectTries = 0; mpConnect(url, name, room); } });   // Retry is a fresh join: it cancels the pending auto-retry
       } else {
         _mpBanner('Co-op connection lost - reconnecting...', 'work', { dismiss: false });
       }
@@ -61334,6 +61336,8 @@ function mpDisconnect() {
     const _dh = document.getElementById('mp-direct-hostinfo');
     if (_dh) { _dh.style.display = 'none'; _dh.innerHTML = ''; }
   }
+  net._everWelcomed = false;
+  _mpBannerDismiss();   // fix-mp-leave-banner - Leave ends the party's banner: "In party X - share the code" (10 s), "Joining..." and "reconnecting..." outlived it
   _mpStatus('Disconnected', '#bbb');
   _mpRenderPlayerList();
   if (typeof _lxCoopRefillSoon === 'function') _lxCoopRefillSoon('leave');   // v0.30.1805 release25c: the map does not stay empty
@@ -61714,6 +61718,7 @@ _COOP_MON_CORE.ar = 1; _COOP_MON_CORE.sn = 1;   // bughunt coop-mirror - ar: the
 const _COOP_MON_EX = { iv: 1, aa: 1, fz: 1, st: 1, wd: 1, wg: 1, wb: 1, ps: 1, sp: 1, dp: 1, p: 1, sg: 1, op: 1, bk: 1, cs: 1, sf: 1, tw: 1, qb: 1, ib: 1, gh: 1, lo: 1, fb: 1, pm: 1 };   // bughunt coop-mirror: ib burrow, gh ghost step, lo libra pan, fb Taurus planted, pm host-only damage-taken product (ar / sn ride _COOP_MON_CORE)   // v0.30.x grav-tp: tw; qb: a Ticket Rush mech's booking (the landed-fix marker pins the OPENING literal, so new keys go on the end)
 _COOP_MON_EX.tg = 1;   // v0.30.1740 coop-guest (bughunt H17-1): a boss's windup, so a guest draws its warning (see _lxCoopTgOf; a line of its own, the table's literal is left alone)
 _COOP_MON_EX.rf = 1; _COOP_MON_CORE.gb = 1;   // v0.30.1742 release14: rf the one-way boss flags (every frame it is set), gb Gravitos's base stats (keyframes) - see _lxCoopFormSync
+_COOP_MON_EX.og = 1;   // fix-mirror-ground - og: a grounded boss (see _coopTickMonsters; every frame it is set, absent = airborne)
 function _coopDeltaOn() {   // at least one partner on my map, and every one of them reads light frames
   if (!_coopActive()) return false;
   let n = 0;
@@ -62265,6 +62270,7 @@ function _coopTickMonsters() {
     if (m._dirGhostT > 0) _e.gh = 1;
     if (m._libraOrb) _e.lo = (m._libraOrbActive === false) ? 2 : 1;
     if (m._artKey) _e.ar = String(m._artKey).slice(0, 24);
+    if (m.isBoss && m.onGround) _e.og = 1;   // fix-mirror-ground - a grounded boss: a mirror runs no physics, so its onGround sat at spawn's false for ever (Leo's zodiac anim plays its pounce set on !onGround, so the guest saw his leap loop through every idle and the ward dome measured it)
     if (m.isShiny) _e.sn = 1;
     // bughunt boss-3 - what a guest needs to PREDICT the host's judgement (the host still applies every one of them): fb - Taurus planted, so the
     // guest's own hitMonster deflects a front hit like solo; pm - the product of the host-only damage-taken multipliers (the Sovereign's Regalia /
@@ -63313,6 +63319,7 @@ function _coopTryDowned() {
   player.vx = 0; player.hitStun = 0;
   // clear DoT/CC so the window is the timer, not a poison tick
   player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;
+  player._sdLeft = 0; player._sdNextAt = 0;   // fix-sd-downed - Soul Drain ends with the down ("ends if you die"): updatePlayer returns before its tick, so it sat at 10 with the aura and icon up, and a revive resumed it
   player._slowTimer = 0; player._skillLockTimer = 0; player._iceFloor = 0;   // v0.30.1726 release9: their countdowns sit below the downed return, so they froze and survived the revive
   // v0.29.x — clear a live Shackle QTE too (per user: "when i am shackled and
   // down i get stuck"). Same structural trap the DEATH path already guards
@@ -64021,6 +64028,7 @@ function _coopApplyMonsters(msg) {
     m.invulnerable = (e.iv > 0) ? Math.min(6000, +e.iv | 0) : 0;   // v0.30.1336 coop-regen - the host owns it; hitMonster's IMMUNE gate reads it
     m.freezeTimer = (e.fz > 0) ? Math.min(3000, +e.fz | 0) : 0;   // v0.30.x — mirrored like the gauge: the host owns it
     m.stunTimer   = (e.st > 0) ? Math.min(1500, +e.st | 0) : 0;
+    if (m.isBoss) m.onGround = !!e.og;        // fix-mirror-ground - the host's grounded flag: Leo's idle (and the dome measured off its frame 0), Barnaby's weave / duck read it too
     m._invulnBurrow = !!e.ib;                 // bughunt coop-5 - the host owns the burrow; hitMonster's BURROWED gate and the untargetable checks read it
     m._dirGhostT = e.gh ? 300 : 0;            // bughunt parityB-8b - Ghost Step: the guest's evasion roll (x2.5 + 60) matches the host's; rewritten every frame, a mirror never decays it
     m._frontBlocked = !!e.fb;                 // bughunt boss-3 - Taurus planted: the guest's own hitMonster deflects a front hit (no forward), as solo; the host re-checks from the sender's side
@@ -65256,6 +65264,7 @@ function _mpHandle(msg) {
     case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
     case 'welcome':
       net.myId = msg.id;
+      net._everWelcomed = true;   // fix-mp-joinfail - from here a drop is a lost connection
       net._reconnectTries = 0;   // v0.30.834 - joined for real: the next drop starts its backoff from 1 s again
       net.roomId = String(msg.room || net.roomId || '').replace(/[<>]/g, '').slice(0, 64);   // v0.26.1029 — scrub at ingestion; roomId feeds an innerHTML log sink (XSS from a hostile/MITM relay)
       net.peers = {};
@@ -89922,6 +89931,7 @@ function triggerDeath() {
   game._eclipseAlpha = 0; game._eclipseState = null; game._eclipseCD = null;
   game.blackFlashOverlay = 0; game.blackHoldFrames = 0;   // v0.26.1024 — same class: overlay renders while dead, decay only runs alive
   game._diedInExpedition = false;   // v0.26.x audit -- never inherit a stale flag from an aborted prior death
+  player._sdLeft = 0;   // fix-sd-downed - death ends Soul Drain at once (its tick only runs while alive, so the aura and icon sat on the death screen)
   player._downFallAt = 0; player._downRiseAt = 0;   // v0.29.764 — the downed pose ends with death; a respawned hero stands up instantly, no ghost get-up
   // v0.26.x glitch-fix -- death mid-Shackle-QTE: updatePlayer early-returns while
   // dying so _qteFrame never fires again to self-clear; do it here so the player
@@ -180343,6 +180353,7 @@ const _LX_PAUSE_PLAYER_FIELDS = ['_spawnBoostUntil', '_rampUntil', '_riftSurgeUn
 // v0.30.1730 bughunt4 - the stat-set signatures (v0.30.1581) run on game.time too: Heartwood's once-a-minute Regrowth was ready again after a
 // 60 s menu, and Regrowth's window and Immovable's stacks ran out behind one
 _LX_PAUSE_PLAYER_FIELDS.push('_regrowthCd', '_regrowthUntil', '_graniteUntil');
+_LX_PAUSE_PLAYER_FIELDS.push('_sdNextAt');   // fix-sd-pause - Soul Drain's tick deadline: a menu advanced its cadence and a tick fired at once on close
 const _LX_PAUSE_MON_FIELDS = ['_piscesDreamUntil', '_geminiLyingUntil', '_libraImbalanceUntil', '_hexUntil', '_doomUntil',
   '_sovereignOhkoTick', '_sovCollapseUntil', '_sovSpentUntil', '_sovExposedUntil', '_sovRegaliaEnds', '_sovRegaliaAt',
   '_sovereignHomingAt', '_sovereignDrainAt', '_sovShardShotAt', '_astralJudgeNextAt',
@@ -183653,6 +183664,8 @@ function _bossRushRoster() {
       // Mirror Self mirrors the PLAYER and is staged by the Inner
       // Dimension's own scripted flow — unsafe to re-summon raw.
       if (t === 'mirrorSelf') continue;
+      // fix-rush-tower - the Tower re-bases these two when it spawns them (_expeditionSpawnTowerBoss); their table rows are placeholders, so an echo was a levelless 19k / 99k HP pushover that sorted first
+      if (t === 'towerArbiter' || t === 'towerSovereign') continue;
       if (!game.mojidexSeen || !game.mojidexSeen[t]) continue;
       out.push(t);
     }

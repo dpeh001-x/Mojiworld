@@ -98,7 +98,7 @@ for (const n of NAMES) check(r[n].lead === 0, `${n}: attack art opens on the pat
 for (const n of NAMES) check(r[n].slidNonWalk === 0, `${n}: his body never moves under attack / idle art`, { slid: r[n].slidNonWalk });
 check(r.claw.maxXdev < 0.6 && r.claw.by.walk === undefined, 'claw: he swipes from where he stands, attack art the whole way (was a 18-26 px step-in on walk frames)', r.claw);
 check(r.jumpSlam.maxXdev < 0.6 && r.jumpSlam.by.walk === undefined, 'jump slam: straight up and down on the spot, attack art the whole way (was an 80-167 px glide on walk frames)', r.jumpSlam);
-check(r.jumpSlam.rose >= 100 && r.jumpSlam.waves === 2, 'jump slam: he still leaves the floor (>= 100 px) and lands two shockwaves', { rose: r.jumpSlam.rose, waves: r.jumpSlam.waves });
+check(r.jumpSlam.rose >= 80 && r.jumpSlam.waves === 2, 'jump slam: he still leaves the floor (>= 80 px; jump strength is 4 since the user cut it from 9) and lands two shockwaves', { rose: r.jumpSlam.rose, waves: r.jumpSlam.waves });
 check(r.claw.clawGap != null && r.claw.clawGap >= 25 && r.claw.clawGap < 36, 'claw: the swipe box starts 26 px further out (it has flown 0-4 px by the first look) - the reach the step-in used to give it', { gap: r.claw.clawGap });
 const u = R.unit;
 check(!u.missing, 'the build paces his walk by distance (_krookWalkPos)', u);
