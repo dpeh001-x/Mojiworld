@@ -15739,7 +15739,7 @@ The sleeping world is listening.</div>
 <div id="backup-modal-bg" onclick="if(event.target===this) closeBackupModal()">
   <div id="backup-modal">
     <h2>🗂 SAVE BACKUPS</h2>
-    <p class="bk-lede">Snapshot your progress into a slot before risky runs, restore an older state, or download a slot as a signed <code>.mojisave</code> file (tamper-checked on import). Up to 5 slots — oldest is dropped when full. Restoring reloads the game. Use <b>🔒 Secure Save</b> for a signed hard backup of your <em>current</em> progress, and <b>⬆ Load a save file</b> to bring one in from this device.</p>
+    <p class="bk-lede">Snapshot your progress into a slot before risky runs, restore an older state, or download a slot as a signed <code>.mojisave</code> file (tamper-checked on import). Up to 5 slots — when full, the oldest automatic safety copy goes first, then the oldest slot. Restoring reloads the game. Use <b>🔒 Secure Save</b> for a signed hard backup of your <em>current</em> progress, and <b>⬆ Load a save file</b> to bring one in from this device.</p>
     <div id="backup-slots"></div>
     <div class="bk-import">   <!-- menu-import: load a save file from this device (the title menu's only way in on a new device) -->
       <button class="bk-now" id="backup-import-btn" onclick="document.getElementById('backup-import-file').click()" type="button" title="Pick a .mojisave or .json save file from this device. Signed saves are integrity-checked; the game reloads with it.">⬆ Load a save file…</button>
@@ -16484,7 +16484,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1879';
+const GAME_VERSION = 'v0.30.1880';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -32491,7 +32491,7 @@ const QUESTS = {
       { target: 'lady_honk',     count: 100 },
       { target: 'willeo',        count: 100 },
     ],
-    desc: 'The tear took the town the way the sea takes a coastline. In its first week, Taiga, Lady Hong and Will stood in its mouth so it could take no one else, and walked home. Something of each stayed behind: a copy, left too long in the cold. Lyra wants someone who knew their names to put the copies down. She is not strong enough, so she asks you.\n\nHer father, High Sage Vesper, went in on the first day to close what his own notes described. The page she copied was his. His last entry in Auron\'s ledger is a measurement: a stair that should not exist, a light at the top, and people sitting under it who had stopped.\n\nIf you find that stair, read what is written at the bottom of it before you climb. Lyra thinks the road to it runs past a forge. Barnaby can say, once you have read his order book.',   // v0.30.909 tightened
+    desc: 'The tear took the town the way the sea takes a coastline. In its first week, Taiga, Lady Hong and Will stood in its mouth so it could take no one else, and walked home. Something of each stayed behind: a copy, left too long in the cold. Lyra wants someone who knew their names to put the copies down. She is not strong enough, so she asks you.\n\nHer father, High Sage Vesper, went in on the first day to close what his own notes described. The page she copied was his. His last entry in Auron\'s ledger is a measurement: a stair that should not exist, a light at the top, and people sitting under it who had stopped.\n\nIf you find that stair, read what is written at the bottom of it before you climb. Lyra thinks the road to it runs past a forge.',   // v0.30.909 tightened
     rewards: { mojicoins: 16500, exp: 368653, gearChance: 1.00, gearTier: 4, potions: { hp_l: 8, mp_l: 8 } },
   },
   // =========================================================================
@@ -53967,6 +53967,8 @@ function _lxHuntRewardScale(q, target) {
   return Math.max(1, Math.min(LX_HUNT_REWARD_CAP, target / LX_HUNT_REF));
 }
 const SAVE_KEY = 'levelx_save_v1';
+// fix-two-tab-save - the stamp (t) at the head of a stored save, read without parsing it; 0 when it cannot be read (an older build, junk, no save)
+function _lxSaveStampOf(raw) { const m = (typeof raw === 'string') ? /^\{"v":\d+,"t":(\d+)[,}]/.exec(raw) : null; return m ? +m[1] : 0; }
 // v0.30.1181 paint-save - the Wardrobe paint (up to 11 layers + the full-body paint, PNG data URLs: 1-3 MB on a painted hero)
 // lives under its OWN key and is written only when it changes. Every save used to re-serialise and re-write all of it: 29-65 ms
 // per save, 6-11 saves a minute in a fight, and most of the storage quota (fewer Save Backups fitted). The save carries
@@ -54561,7 +54563,7 @@ async function _lxSteamCloudSync() {
         arr.unshift({ id: 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
           ts: Date.now(), label: 'auto · before cloud sync',
           name: meta.name, level: meta.level, cls: meta.cls, map: meta.map, data: _lxSaveWithPaint(localRaw) });   // v0.30.1181 paint-save - with the paint
-        while (arr.length > ((typeof BACKUP_MAX !== 'undefined') ? BACKUP_MAX : 8)) arr.pop();
+        _lxTrimBackups(arr, (typeof BACKUP_MAX !== 'undefined') ? BACKUP_MAX : 8);   // fix-backup-evict
         _lxStoreBackups(arr);
       }
     } catch (e) {}
@@ -56536,6 +56538,7 @@ function _flushSaveStateNow() {
         // advancement must always be allowed to save.
         if (_cs && _cs.style.display === 'flex'
             && !(typeof player !== 'undefined' && player && player.cls)) return; } catch (e) {}
+  if (typeof _lxStaleTabHold === 'function' && _lxStaleTabHold()) return;   // fix-two-tab-save: another tab saved since this one last wrote - write nothing over it
   try {
     // audio.muted is the single source of truth; sync the serialization mirror here
     if (typeof audio !== 'undefined' && audio) game.muted = !!audio.muted;
@@ -56558,7 +56561,11 @@ function _flushSaveStateNow() {
     try { if (typeof _lxLocalSaveSig === 'function') s.sig = _lxLocalSaveSig(s); } catch (e) {}   // v0.30.414 — see _lxLocalSaveVerdict
     try { if (_lxAc.on) _lxAc.sig5Stamp(s); } catch (e) {}   // v0.30.1677 ac-save
     // v0.30.1181 paint-save - the Wardrobe paint goes under its own key, and only when it changed (see _lxPaintWrite)
-    const _json = _lxPaintWrite(s);
+    // fix-two-tab-save: the stamp this tab wrote last. Set BEFORE the write: _lxPaintWrite can store the save and then throw (the paint record or the inline copy
+    // does not fit), and that stamp is this tab's own. Only a write that stored nothing of ours puts the old stamp back.
+    const _lwPrev = game._lastWriteT; game._lastWriteT = s.t;
+    let _json;
+    try { _json = _lxPaintWrite(s); } catch (e) { try { if (_lxSaveStampOf(localStorage.getItem(SAVE_KEY)) !== s.t) game._lastWriteT = _lwPrev; } catch (e2) {} throw e; }
     try { if (_lxAc.on) _lxAc.rbKeep(s, _json); } catch (e) {}   // v0.30.1677 ac-save
     try { if (s.sig && typeof _lxSaveMarkWrite === 'function') _lxSaveMarkWrite(s); } catch (e) {}
     // Server-sided MMO-lite: also push the save to the cloud account (throttled,
@@ -58806,6 +58813,7 @@ function loadState() {
   try {
     let raw = localStorage.getItem(SAVE_KEY); if (!raw) return false;
     try { if (_lxAc.on) raw = _lxAc.rbPick(raw); } catch (e) {}   // v0.30.1677 ac-save - an old save put back loads the newest copy
+    try { game._lastWriteT = _lxSaveStampOf(raw); } catch (e) {}   // fix-two-tab-save: the stamp this tab starts from (see _lxStaleTabHold)
     // v0.29.560 — SECURITY: proto-safe parse. This is THE sink — `s.player`
     // and `s.game` go straight into Object.assign below, which is what turns
     // an own `__proto__` key into a real prototype swap. See _lxSafeJsonParse.
@@ -59729,7 +59737,7 @@ function _lxKeepUnloadableSave(raw, label) {
     const meta = (typeof _lxSaveMetaFrom === 'function') ? _lxSaveMetaFrom(raw) : {};
     arr.unshift({ id: 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ts: Date.now(), label: label,
       name: meta.name, level: meta.level, cls: meta.cls, map: meta.map, data: raw });
-    while (arr.length > ((typeof BACKUP_MAX !== 'undefined') ? BACKUP_MAX : 8)) arr.pop();
+    _lxTrimBackups(arr, (typeof BACKUP_MAX !== 'undefined') ? BACKUP_MAX : 8);   // fix-backup-evict
     _lxStoreBackups(arr);
   } catch (e) {}
 }
@@ -59768,6 +59776,20 @@ function clearSave() {
 // =========================================================================
 const BACKUP_KEY = 'lx_save_backups_v1';
 const BACKUP_MAX = 5;
+// fix-backup-evict - over the cap, an automatic safety copy goes before a slot the player made on purpose. The newest entry always stays: when only the
+// player's own slots are left, the fresh safety copy takes one slot more rather than push one of theirs out.
+function _lxTrimBackups(arr, max) {
+  const isAuto = (b) => !!(b && typeof b.label === 'string' && b.label.indexOf('auto') === 0);
+  while (arr.length > max) {
+    let k = -1;
+    for (let i = arr.length - 1; i >= 1; i--) if (isAuto(arr[i])) { k = i; break; }
+    if (k < 0) {
+      if (isAuto(arr[0]) && arr.length === max + 1) break;
+      k = arr.length - 1;
+    }
+    arr.splice(k, 1);
+  }
+}
 function _lxGetBackups() {
   try { const a = _lxSafeJsonParse(localStorage.getItem(BACKUP_KEY));   /* v0.29.560 proto-safe */ return Array.isArray(a) ? a : []; }
   catch (e) { return []; }
@@ -59813,7 +59835,7 @@ function _lxCreateBackup(label) {
       ts: Date.now(), label: label || '',
       name: meta.name, level: meta.level, cls: meta.cls, map: meta.map, data
     });
-    while (arr.length > BACKUP_MAX) arr.pop();
+    _lxTrimBackups(arr, BACKUP_MAX);   // fix-backup-evict
     const full = _lxStoreBackups(arr);
     if (_lxBackupStoreResult === 'failed') { if (typeof showToast === 'function') showToast('⚠ Backup FAILED - browser storage is full. Delete an old slot in Save Backups and try again.', 'danger'); try { _renderBackupSlots(); } catch (e) {} return false; }   // v0.30.890
     if (typeof showToast === 'function') showToast(full ? '🗂 Backup saved.' : '🗂 Backup saved (older slots pruned — storage full).', 'rare');
@@ -59836,6 +59858,11 @@ function _lxRestoreBackup(id) {
     }
   } catch (e) {}
   try {
+    // fix-restore-keeps-current - the save this replaces goes into a slot first: restoring an old slot by mistake used to discard newer progress for good
+    if (hasSave()) {
+      let _kept = false; try { _kept = _lxCreateBackup('auto · before restore') !== false; } catch (e) {}
+      if (!_kept) { if (typeof showToast === 'function') showToast('Restore cancelled: your current progress could not be backed up first (browser storage is full). Delete an old slot and try again.', 'danger'); return; }
+    }
     _lxSaveStoreRaw(b.data);   // v0.30.1181 paint-save - the paint back under its own key
     try { _lxMarkLocalSaveAuthoritative(); } catch (e) {}   // v0.30.890
     // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
@@ -67673,6 +67700,8 @@ function _lxPurgeRetiredQuests() {
     if (typeof QUESTS !== 'object' || !player || !player.quests) return;
     for (const id of _LX_RETIRED_QUESTS) {
       if (QUESTS[id]) continue;
+      // fix-tear6-legacy: a save holding The Tear VI with the copy already felled was owed that pay, and The Last Step now carries it: mark it owed so the quiet-complete below does not eat it
+      if (id === 'q_lyra_last') { const _t6 = player.quests.active && player.quests.active[id]; if (_t6 && (_t6.readyToHandIn || (_t6.progress | 0) > 0) && !(player.quests.completed || {}).q_last_step && typeof game !== 'undefined' && game) { if (!game.bestiary) game.bestiary = {}; game.bestiary._lastStepEarly = 1; } }
       for (const k of ['active', 'completed', 'unlocked', 'fresh']) { const b = player.quests[k]; if (b && typeof b === 'object') delete b[id]; }
       if (player._qBank) delete player._qBank[id];
       if (player._pqStagePaid) delete player._pqStagePaid[id];
@@ -67822,6 +67851,7 @@ function tickQuestKill(monsterType, isBoss) {
       }
       if (!_obj) continue;
       const a = player.quests.active[id]; if (!a) continue;
+      if (a.readyToHandIn) continue;   // fix-overkill-count: every quota is full, the turn-in is all that is left
       if (!a.objProgress) a.objProgress = {};
       a.objProgress[_obj.target] = (a.objProgress[_obj.target] || 0) + 1;
       a.progress = q.objectives.reduce((s, o) => s + Math.min(o.count, a.objProgress[o.target] || 0), 0);
@@ -67848,6 +67878,7 @@ function tickQuestKill(monsterType, isBoss) {
     if (q.cls && q.cls !== player.cls) continue;
     const a = player.quests.active[id];
     if (!a) continue;
+    if (a.readyToHandIn) continue;   // fix-overkill-count: the goal is met and waits for the hand-in; counting on made the Journal read 16/10
     a.progress = (a.progress || 0) + 1;
     _anyProgress = true;
     // v0.26.301 — Per user "provide a very clear notice about the task
@@ -69630,7 +69661,7 @@ function acceptQuest(id, _lxQuiet) {   // v0.30.902 _lxQuiet: the caller announc
 // and the restored progress would be measured against a different target.
 function _lxBankQuestProgress(id, a) {
   if (!a) return;
-  const prog = a.progress | 0;
+  const prog = _lxQuestShown((typeof QUESTS !== 'undefined') ? QUESTS[id] : null, a);   // fix-overkill-count
   const hasObj = a.objProgress && Object.keys(a.objProgress).length;
   if (prog <= 0 && !hasObj) return;            // nothing worth keeping
   try {
@@ -69656,10 +69687,17 @@ function _lxBankQuestProgress(id, a) {
 // How far along a quest is, in the words the dialog should use.
 function _lxQuestProgressLine(id, a) {
   const q = (typeof QUESTS !== 'undefined' && QUESTS[id]) || null;
-  const prog = (a && a.progress) | 0;
+  const prog = _lxQuestShown(q, a);   // fix-overkill-count
   const tgt = (a && a.targetCount != null) ? a.targetCount : (q ? (q.count | 0) : 0);
   if (tgt > 0) return prog + ' of ' + tgt;
   return String(prog);
+}
+// fix-overkill-count - a kill / boss quest's progress as shown and banked: never past its target (a save made while the count ran on holds 16 of 10)
+function _lxQuestShown(q, a) {
+  const p = (a && a.progress) | 0;
+  if (!q || (q.kind !== 'kill' && q.kind !== 'boss')) return p;
+  const t = (a && a.targetCount != null) ? a.targetCount : (q.count | 0);
+  return (t > 0 && p > t) ? t : p;
 }
 // v0.29.878 — QUEST COUNT CLARITY (per user: "make sure to state the correct
 // quantities"). Audited across all 278 quests: 13 counted story quests name no
@@ -75104,7 +75142,7 @@ function renderQuestJournal() {
     let metaHtml = '';
     if (isActive && q.count) {
       const _a = player.quests.active[id] || {};
-      const p = _a.progress || 0;
+      const p = _lxQuestShown(q, _a);   // fix-overkill-count
       // v0.25.990 — Per-player dynamic targetCount override. Used by
       // q_clockwork_express to surface the random per-roll target in the
       // journal progress bar instead of the static q.count ceiling.
@@ -184374,11 +184412,74 @@ window.addEventListener('beforeunload',     () => {
     }
   } catch (e) {}
 });
+// fix-two-tab-save - ONE SAVE KEY, ONE WRITER AT A TIME. Every in-world tab flushes the same key and a hidden tab's 30 s heartbeat keeps ticking,
+// so the progress made in a second tab was written over by the first tab's stale state within half a minute (or when that tab was closed last).
+// A tab remembers the stamp of the save it last wrote or loaded (game._lastWriteT). A flush that finds a NEWER stamp in storage knows another tab
+// has saved since: it writes nothing, a banner says so, and a reload picks the newer save up. The title screen, import / restore / reset
+// (game._resetting), a failing write and a save with no readable stamp (an older build) never trip it.
+function _lxStaleTabHold() {
+  try {
+    if (typeof game === 'undefined' || !game) return false;
+    if (game._staleTab) return true;
+    if (game._resetting || !_lxHeroInWorld()) return false;
+    const stored = _lxSaveStampOf(localStorage.getItem(SAVE_KEY));
+    if (!(stored > 0) || stored <= (game._lastWriteT || 0)) return false;
+    _lxStaleTabFlag();
+    return true;
+  } catch (e) { return false; }
+}
+// the storage event: another tab wrote a save that is not the one this tab wrote or loaded
+function _lxStaleTabNote(stamp) {
+  try {
+    if (!(stamp > 0) || stamp === (game._lastWriteT || 0) || game._resetting || !_lxHeroInWorld()) return false;
+    _lxStaleTabFlag();
+    return true;
+  } catch (e) { return false; }
+}
+function _lxStaleTabFlag() {
+  if (game._staleTab) return;
+  game._staleTab = true;
+  try { if (game._saveTimer) { clearTimeout(game._saveTimer); game._saveTimer = null; } } catch (e) {}
+  _lxStaleTabShow();
+}
+function _lxStaleTabShow() {
+  try {
+    if (document.getElementById('lx-stale-tab')) return;
+    if (!document.getElementById('lx-stale-style')) {
+      const st = document.createElement('style'); st.id = 'lx-stale-style';
+      st.textContent = '#lx-stale-tab{position:fixed;left:0;right:0;top:10px;margin:0 auto;width:max-content;max-width:calc(100vw - 24px);z-index:100070;box-sizing:border-box;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px 12px;padding:9px 12px;border-radius:12px;font-family:inherit;font-size:12px;font-weight:700;line-height:1.35;color:#fff4dc;background:linear-gradient(160deg,rgba(64,14,24,.97),rgba(34,17,60,.97));border:1px solid rgba(255,150,120,.75);box-shadow:0 8px 22px rgba(0,0,0,.5)}'
+        + '#lx-stale-tab .lxs-t{flex:1 1 240px;min-width:0;text-align:center}#lx-stale-tab .lxs-b{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}'
+        + '#lx-stale-tab button{font-family:inherit;font-size:11px;font-weight:800;letter-spacing:.5px;line-height:1;min-height:30px;padding:6px 11px;border-radius:8px;cursor:pointer}'
+        + '#lx-stale-tab .lxs-go{background:linear-gradient(180deg,#ffe78f,#ffc23d 56%,#e5951a);color:#2a1606;border:1px solid #fff0b8}'
+        + '#lx-stale-tab .lxs-keep{background:rgba(255,255,255,.07);color:#e9ddff;border:1px solid rgba(200,160,255,.45)}';
+      document.head.appendChild(st);
+    }
+    const el = document.createElement('div'); el.id = 'lx-stale-tab'; el.setAttribute('role', 'alert');
+    el.innerHTML = '<span class="lxs-t">Mojiworld is open in another tab - progress in this tab is not being saved. Reload this tab to continue from your newest save.</span>'
+      + '<span class="lxs-b"><button type="button" class="lxs-go">Reload this tab</button><button type="button" class="lxs-keep">Keep this tab instead</button></span>';
+    for (const t of ['pointerdown', 'mousedown', 'touchstart', 'click']) el.addEventListener(t, (e) => e.stopPropagation());   // not a click on the game
+    el.querySelector('.lxs-go').addEventListener('click', () => {
+      // _resetting stops every flush on the way out: the stale state must not land over the newer save
+      try { game._resetting = true; if (game._saveTimer) { clearTimeout(game._saveTimer); game._saveTimer = null; } game._saveDirty = false; } catch (e) {}
+      try { location.reload(); } catch (e) {}
+    });
+    const keep = el.querySelector('.lxs-keep'); let armT = 0;
+    keep.addEventListener('click', () => {   // the other way round: this tab's progress wins, after a second click
+      if (!armT) { keep.textContent = 'Overwrite the other tab?'; armT = setTimeout(() => { armT = 0; keep.textContent = 'Keep this tab instead'; }, 4000); return; }
+      clearTimeout(armT); armT = 0;
+      try { _lxCreateBackup('auto · other tab'); } catch (e) {}   // the flag is still up, so this only copies what the other tab saved into Save Backups
+      try { game._lastWriteT = _lxSaveStampOf(localStorage.getItem(SAVE_KEY)); game._staleTab = false; } catch (e) {}
+      try { el.remove(); } catch (e) {}
+      try { _flushSaveStateNow(); } catch (e) {}
+    });
+    document.body.appendChild(el);
+  } catch (e) {}
+}
 // v0.26.x audit FIX (multi-tab) — a second tab sharing this origin can clobber
 // the save (last-writer-wins on one localStorage key), and was exploitable to
 // dupe consumed resources. A storage event fires in THIS tab when ANOTHER tab
 // writes SAVE_KEY. Warn once so the player consolidates to a single tab. This
-// is deliberately a WARNING, not a save-write guard: gating the write path
+// was deliberately a WARNING, not a save-write guard (a stale tab is held now, see _lxStaleTabHold): gating the write path
 // risks a tab silently dropping real progress, which is worse than the niche
 // two-tab self-dupe. The import path sets game._resetting, so its reload-write
 // won't false-trigger for the importing tab.
@@ -184391,6 +184492,7 @@ window.addEventListener('storage', (e) => {
       try { if (typeof window._lxMenuRefresh === 'function') window._lxMenuRefresh(); } catch (_e2) {}
       return;
     }
+    if (e && e.key === SAVE_KEY && e.newValue && !game._resetting && player && player.cls && _lxSaveStampOf(e.newValue) && _lxStaleTabNote(_lxSaveStampOf(e.newValue))) return;   // fix-two-tab-save: held, with a banner
     if (e && e.key === SAVE_KEY && e.newValue && !game._resetting && player && player.cls && !game._multiTabWarned) {
       game._multiTabWarned = true;
       if (typeof showToast === 'function') showToast('⚠ Mojiworld is open in another tab — saves can overwrite each other. Please play in ONE tab to avoid losing progress.', 'danger');
@@ -184890,7 +184992,7 @@ async function _lxCloudSyncOnLogin(session) {
         arr.unshift({ id: 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
           ts: Date.now(), label: 'auto · before cloud sync',
           name: meta.name, level: meta.level, cls: meta.cls, map: meta.map, data: _lxSaveWithPaint(localRaw) });   // v0.30.1181 paint-save - with the paint
-        while (arr.length > ((typeof BACKUP_MAX !== 'undefined') ? BACKUP_MAX : 8)) arr.pop();
+        _lxTrimBackups(arr, (typeof BACKUP_MAX !== 'undefined') ? BACKUP_MAX : 8);   // fix-backup-evict
         _lxStoreBackups(arr);
       }
     } catch (e) {}
