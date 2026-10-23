@@ -13794,7 +13794,7 @@ The sleeping world is listening.</div>
     <div class="skill-key">S</div>
     <div class="skill-icon" style="opacity: 1;">💢</div>
     <div class="skill-mp">18</div>
-    <div class="skill-cd" style="display:none"></div></div><div class="skill-slot ready" title="Rush — Dash forward ~200px, pierce enemies: 2.4× ATK to each foe passed, plus 5 flame bursts (3× ATK, 60px). (Lv 15+)">
+    <div class="skill-cd" style="display:none"></div></div><div class="skill-slot ready" title="Rush — Dash forward ~200px, hitting each foe in your path for 2.4× ATK (a touch that hurts you ends the dash), plus 5 flame bursts (3× ATK, 60px). (Lv 15+)">
     <div class="skill-key">C</div>
     <div class="skill-icon" style="opacity: 1;">🏃</div>
     <div class="skill-mp">15</div>
@@ -16484,7 +16484,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1877';
+const GAME_VERSION = 'v0.30.1878';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -26592,7 +26592,7 @@ const SKILLS = {
   // can't be spammed. Desc updated to advertise the 3-swing combo.
   powerStrike:  { name:'Somersault Smash',icon:'💥', cls:'warrior', slot:'s', mp:10, cd:4500,  desc:'Leap into a somersault, then crash down with a heavy ground smash (3.6× ATK, 0.6s stun; bosses resist it 70% of the time, mini-bosses 50%) and one forward piercing shockwave (3× ATK). Other skills are locked during the flip.' },
   groundSlam:   { name:'Ground Slam',    icon:'💢', cls:'warrior', slot:'a', mp:14, cd:4000 /* v0.30.618 warrior-tune - was 3000 (per user: +1 s) */, desc:'Wind up, then a double somersault that cuts twice (2.2× ATK) into a heavy all-around ground slam (2.2× ATK) — radial AoE (both sides) + triple shockwave ring (1.74× ATK each).' },
-  rush:         { name:'Rush',           icon:'🏃', cls:'warrior', slot:'e', mp:12, cd:1800,  desc:'Dash forward ~200px, pierce enemies: 2.4× ATK to each foe passed, plus 5 flame bursts (3× ATK, 60px).' },
+  rush:         { name:'Rush',           icon:'🏃', cls:'warrior', slot:'e', mp:12, cd:1800,  desc:'Dash forward ~200px, hitting each foe in your path for 2.4× ATK (a touch that hurts you ends the dash), plus 5 flame bursts (3× ATK, 60px).' },
   warCry:       { name:'War Cry',        icon:'📣', cls:'warrior', slot:'w', mp:18, cd:18000, desc:'+55% ATK and +25% DEF for 7s (rank stretches it to 10 s at most) — also rallies co-op partners on your map for 7s. Battle roar taunts foes within 340px + shock-pulses those within 180px for 2.4× ATK. War Cry, Bloodlust and Rampage share one +80% ATK cap.' },
   // Berserker
   bloodlust:    { name:'Bloodlust',      icon:'🩸', cls:'warrior', job:'berserker', slot:'q', mp:22, cd:45000, desc:'20 s rage (+30% ATK, +speed; rank stretches it to 25 s at most) — shared with co-op partners on your map for 20 s. Casting also restores 20% of your max HP and MP. While active, basic attacks launch forward piercing shockwaves (0.9× ATK; a co-op partner gets them only as a warrior). Shares one +80% ATK cap with War Cry and Rampage.' },
@@ -28219,6 +28219,10 @@ function _skillPaidMp(id) {
       && (s.cls === 'mage' || s.job === 'archmage' || s.job === 'warlock')) cost = Math.ceil(cost * 1.5);
   return cost;
 }
+// fix-bar-mp-cost - the MP a press takes at the gate, for the skill bar: the permanent terms (_skillPaidMp: mage -20%, Overload) through
+// _lxPressMpCost (a free Deadeye / Apotheosis press, a Mirror blink) - the same two steps isReady and castSkill take, so the bar's chip and
+// its red cost-high flag read what a press really costs. Pinned against castSkill by scripts/bar_mp_cost_test.mjs.
+function _lxBarMpNeed(id) { return _lxPressMpCost(id, _skillPaidMp(id)); }
 function _skillCdMul(id) {
   let m = player.cls === 'mage' ? 0.90 : 1;
   if (player.tree && player.tree.arrowCdMul && id === 'arrowShot') m *= player.tree.arrowCdMul;
@@ -64905,6 +64909,10 @@ function _lxContactLanding(m, dmg, _shownDmg, _lxTookDmg) {
   player.invulnerable = 1000;
   player._hitIframeAt = game.time;   // v0.29.283 — mark this invuln as HIT-GRANTED (see singularity resolve)
   // Cancel voluntary actions
+  // fix-rush-pierce-contact - a Rush that this touch ends has still reached the foe: its 2.4x pierce hit lands now, once (_rushHitSet), because the
+  // dash loop in updatePlayer would only see the overlap a step later, after the line below zeroed rushTimer. The stop, the damage and the stagger are unchanged.
+  // (only a foe the body overlaps: the host block also lands a proximity swing's reach hit, which is no touch)
+  if (player.rushTimer > 0 && player._rushHitSet && player.hp > 0 && m && m.currentHp > 0 && !player._rushHitSet.has(m) && aabb(player, (typeof _mobTouchBox === 'function') ? _mobTouchBox(m) : m)) { const _rpAg = _lxAreaGroup(); _lxRushPierceHit(_rpAg, m); _rpAg.run(); }
   player.attacking = false;
   player.attackTimer = 0;
   player.rushTimer = 0;
@@ -70360,7 +70368,7 @@ function _kbRenderInfo() {
   if (sk && sk.def) {
     const d = sk.def;
     html += `<div class="kbm-i-skill">${_kbSkillIcon(sk, 34)}<b>${_kbEsc(d.name || '')}</b></div>`
-      + '<div class="kbm-i-stats">' + (d.mp != null ? `<span>MP <b>${d.mp}</b></span>` : '') + (d.cd != null ? `<span>CD <b>${(d.cd / 1000).toFixed(2)}s</b></span>` : '')
+      + '<div class="kbm-i-stats">' + (d.mp != null ? `<span>MP <b>${/* fix-bar-mp-cost: what the cast charges, as the Skills tab prints it */ sk.id ? _skillPaidMp(sk.id) : d.mp}</b></span>` : '') + (d.cd != null ? `<span>CD <b>${(d.cd / 1000).toFixed(2)}s</b></span>` : '')
       + ((typeof getSkillRank === 'function' && sk.id) ? `<span>Rank <b>${getSkillRank(sk.id)}/${(typeof SKILL_RANK_CAP === 'number') ? SKILL_RANK_CAP : 10}</b></span>` : '') + '</div>'
       + (d.desc ? `<div class="kbm-i-txt">${d.desc}</div>` : '');
   } else if (f.slot) html += '<div class="kbm-i-txt">No skill in this slot yet - bind it now and it is ready when the skill unlocks.</div>';
@@ -87370,13 +87378,7 @@ function updatePlayer(dt) {
     const _ag1 = _lxAreaGroup(); for (const m of game.monsters.slice()) {
       if (m.currentHp <= 0) continue;
       if (player._rushHitSet && player._rushHitSet.has(m)) continue;
-      if (aabb(player, m)) {
-        const _rc = rollCrit();   // v0.27.1 — apply crit DAMAGE, not just the flag: the
-        const dmg = Math.floor(getAtk() * 2.4 * (_rc ? getCritDmg() : 1));   // sibling rush path (47014) already did this; here the gold crit number showed but dealt base damage (+ inflated critStreak / crit-proc for free).
-        _ag1.hit(m, dmg, _rc, 'rush');
-        m.vx += player.rushDir * 4;
-        if (player._rushHitSet) player._rushHitSet.add(m);
-      }
+      if (aabb(player, m)) _lxRushPierceHit(_ag1, m);   // fix-rush-pierce-contact: shared with the touch that ends the dash
     } _ag1.run();
     if (player.rushTimer <= 0) {
       // Free hit-set references so dead monsters can be GC'd between casts.
@@ -101643,6 +101645,15 @@ function _lxAreaGroup() {
       for (const [m, dmg, crit, tag, rs, after] of q) { _lxRankSrc = rs; _lxShareCur = s; try { hitMonster(m, dmg, crit, tag); } finally { _lxShareCur = 1; _lxRankSrc = rs0; } if (after) after(m); }
     },
   };
+}
+// fix-rush-pierce-contact - Rush's pierce hit (2.4x ATK, once per foe per cast through player._rushHitSet): ONE copy for the dash loop in
+// updatePlayer and for the touch that ends the dash (_lxContactLanding). The loop tests the overlap a step AFTER the contact block has
+// zeroed rushTimer, so a foe that hurts the hero was never pierced; the landing now delivers its hit before it cancels the dash.
+function _lxRushPierceHit(ag, m) {
+  const _rc = rollCrit();   // crit DAMAGE as well as the flag
+  ag.hit(m, Math.floor(getAtk() * 2.4 * (_rc ? getCritDmg() : 1)), _rc, 'rush');
+  m.vx += player.rushDir * 4;
+  if (player._rushHitSet) player._rushHitSet.add(m);
 }
 function performAround(radius, dmgPct, opts = {}) {
   const _spread = opts.spread !== false;   // v0.30.1462 - mobbing spread (every performAround is an area hit)
@@ -134005,7 +134016,9 @@ function _hasActiveAilment() {
       // v0.26.x audit FIX — the cure effect also clears _iceFloor and _virgoSin,
       // but the gate omitted them, so a cure press was refused when one of those
       // was the ONLY active state (the remedy couldn't clear it in isolation).
-      || (player._iceFloor | 0) > 0 || (player._virgoSin | 0) > 0;
+      || (player._iceFloor | 0) > 0 || (player._virgoSin | 0) > 0
+      // fix-cure-soul-drain - the Remedy also ends Soul Drain (useConsumable zeroes _sdLeft), so a drain on its own must open the gate too
+      || (player._sdLeft | 0) > 0;
 }
 function _useCurePotion() {
   if (!_hasActiveAilment()) return;   // nothing to cure — let the press (e.g. dodge) pass through
@@ -134166,7 +134179,8 @@ function _lxCureNeeded() {
   const P = (typeof player !== 'undefined') ? player : null; if (!P) return true;
   return ((P.frozenTimer | 0) > 0 || (P.freezeTimer | 0) > 0 || (P._slowTimer | 0) > 0 || (P._poisonTimer | 0) > 0
        || (P._skillLockTimer | 0) > 0 || (P.burnTimer | 0) > 0 || (P.hitStun | 0) > 0 || (P.stunTimer | 0) > 0
-       || (P._electrocuteTimer | 0) > 0 || (P._iceFloor | 0) > 0 || (P._virgoSin | 0) > 0);
+       || (P._electrocuteTimer | 0) > 0 || (P._iceFloor | 0) > 0 || (P._virgoSin | 0) > 0
+       || (P._sdLeft | 0) > 0);   // fix-cure-soul-drain - a drink that would end Soul Drain is not useless
 }
 // v0.30.1475 - true while the docked tour is showing its (not yet ticked) potion step.
 function _lxTutPotionStepLive() {
@@ -178975,8 +178989,12 @@ function renderSkillBar() {
     const lvReq = slotLevelReq(slotId);
     const lvGated = player.level < lvReq;
     const cd = player.skillCooldowns[matchId] || 0;
-    const ready = !lvGated && cd <= 0 && player.mp >= matched.mp;
-    const costHigh = !lvGated && player.mp < matched.mp;
+    // fix-bar-mp-cost - judged at the price castSkill charges (the table cost read ~25% high for a mage, so 11-12 MP showed red on a Fireball that casts);
+    // an ARMED Bastion release is a banked cast that never bounces on MP (isReady's _bastionBanked), so it is never red either
+    const need = _lxBarMpNeed(matchId);
+    const _banked = (matchId === 'crusader_ult' && player.master === 'crusader' && (player._bastionArmedUntil | 0) > game.time);
+    const ready = !lvGated && cd <= 0 && (_banked || player.mp >= need);
+    const costHigh = !lvGated && !_banked && player.mp < need;
     if (s._lvGated !== lvGated) {
       s._lvGated = lvGated;
       s.root.classList.toggle('locked', lvGated);
@@ -178999,12 +179017,12 @@ function renderSkillBar() {
     if (lvGated) {
       const reqTxt = 'Lv ' + lvReq;
       if (s._mp !== reqTxt) { s._mp = reqTxt; s.mpEl.textContent = reqTxt; }
-    } else if (matched.mp > 0) {
+    } else if (need > 0) {
       // v0.25.597 — dock shrunk 25 % so the chip drops its " MP" suffix
       // and shows only the cost number. Fits cleanly inside a 40 px slot
       // without overlapping the centred icon. The full text is still on
       // the tooltip via slot.title.
-      const mpTxt = String(matched.mp);
+      const mpTxt = String(need);   // fix-bar-mp-cost
       if (s._mp !== mpTxt) { s._mp = mpTxt; s.mpEl.textContent = mpTxt; }
     } else {
       if (s._mp !== '') { s._mp = ''; s.mpEl.textContent = ''; }
