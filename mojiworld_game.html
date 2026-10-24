@@ -16488,7 +16488,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1883';
+const GAME_VERSION = 'v0.30.1884';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -161195,9 +161195,8 @@ function _gravitosSoulFrame(m) {
   // Singularity and Collapse Rain as they resolve - the frames before it sharing the wait in their authored proportions,
   // the blow its own authored length, the rest what is left of the window.
   const _sk = _gravCastKey(m, 'soul'), _sft = n > 1 ? _lxCalibFt(_sk, 'attack') : null, _shit = _sft ? _gravOnceHitMs(m) : null;
-  if (_shit != null) { const _f = _gravTeleMs(m, 1) || 1; return frames[_lxKeyedIdx(n, _sft, _lxBossKeyFrame(_sk, n, _sft), (m.patternTimer || 0) / _f, _shit / _f, _dur / _f)]; }
-  const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / _dur));
-  return frames[Math.min(n - 1, Math.floor(t * n))];
+  if (_shit != null) { const _f = _gravTeleMs(m, 1) || 1; return frames[_lxGravSmoothIdx(n, _lxBossKeyFrame(_sk, n, _sft), (m.patternTimer || 0) / _f, _shit / _f)]; }   // v0.30.1884 grav-smooth-anim
+  { const _f = _gravTeleMs(m, 1) || 1; return frames[_lxGravSmoothIdx(n, Math.floor(n * 0.6), (m.patternTimer || 0) / _f, (_dur * 0.6) / _f)]; }   // v0.30.1884 grav-smooth-anim - no authored timing
 }
 // True when THIS mob, in THIS pattern, should use the soul set. Kept beside the
 // frame picker so the two can't drift apart: soulDrain on any form, the two
@@ -161228,7 +161227,7 @@ function _gravitosLaserFrame(m) {
   const _lk = _gravCastKey(m, 'laser'), _lft = n > 1 ? _lxCalibFt(_lk, 'attack') : null;
   if (_lft) {
     const _f = _gravTeleMs(m, 1) || 1, _rel = m._lxLaserChargeMs || (_ph === 3 ? 350 : _ph === 2 ? 420 : 500);
-    return frames[_lxKeyedIdx(n, _lft, _lxBossKeyFrame(_lk, n, _lft), (m.patternTimer || 0) / _f, _rel / _f, (_GRAV_LASER_DUR[_ph] || 1200) / _f)];
+    return frames[_lxGravSmoothIdx(n, _lxBossKeyFrame(_lk, n, _lft), (m.patternTimer || 0) / _f, _rel / _f)];   // v0.30.1884 grav-smooth-anim
   }
   const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / (_GRAV_LASER_DUR[_ph] || 1200)));
   return frames[Math.min(n - 1, Math.floor(t * n))];
@@ -161275,7 +161274,40 @@ function _lxGravSingFitIdx(m, key, n) {   // v0.30.1827 grav-star-fit - the fram
   // v0.30.1827 grav-star-fit - resolved but not yet idle (the resolve's hitstop): hold the last frame; not yet spawned: the pattern clock
   const e = h ? (h.maxLife - h.life) * 1000 / 60 : m._sgSpawned ? T : (m.patternTimer || 0) / (_gravTeleMs(m, 1) || 1);
   const k = _lxBossKeyFrame(key, n, ft), post = _lxFtTotal(n, ft) - _lxFtPrefix(n, ft, k);   // v0.30.1827 grav-star-fit - the blow and all after it, authored ms
-  return _lxKeyedIdx(n, ft, k, e, Math.max(0, T - post), T);
+  return _lxGravSmoothIdx(n, k, e, Math.max(0, T - (n - 1 - k) * _LX_GRAV_FMS));   // v0.30.1884 grav-smooth-anim - the last frame starts on the resolve, as before
+}
+// v0.30.1884 grav-smooth-anim - THE CASTS PLAY, THEY DO NOT STRETCH OR FREEZE (per user: Collapse Rain "remains frozen on a sprite", "especially for form 3";
+// "retime all the sprite sequences for gravitos 1, 2, 3 ... smooth (the punches are good, edit the rest)"). Each cast set keeps its
+// key frame on the cast's moment (the blow), as v0.30.1372 / 1827 set it, but the frames around it no longer stretch to fill the
+// wait: measured in live fights, form 2/3's star set showed 1.1-2 s per frame before a Singularity and then held its last frame
+// 16-20 s through Collapse Rain; form 1's soul set crawled at 400-560 ms a frame, then rushed 45 ms, then held 14 s. Now every
+// frame lasts _LX_GRAV_FMS: a long wait before the blow is a charge-up (the first wind-up frames rocking), the run-in reaches the
+// key frame on the blow, the follow-through plays at the same pace, and a pattern still running after it (Collapse Rain's
+// boxes, a drain) rocks the closing frames instead of holding one. n, k (key index), e (ms into the cast), hit (ms of the blow).
+const _LX_GRAV_FMS = 110;
+function _lxGravSmoothIdx(n, k, e, hit) {
+  const F = _LX_GRAV_FMS;
+  if (!(n > 1)) return 0;
+  k = Math.max(0, Math.min(n - 1, k | 0)); e = Math.max(0, e || 0); hit = Math.max(0, hit || 0);
+  const pp = (lo, hi, t) => { const span = hi - lo; if (span <= 0) return lo; const per = span * 2; const st = Math.floor(Math.max(0, t) / F) % per; return lo + (st <= span ? st : per - st); };
+  if (e < hit) {
+    if (k === 0) return 0;
+    const start = hit - k * F;                     // the run-in: frames 0..k-1, one F each, landing on k at the blow
+    if (start <= 0) return Math.min(k - 1, Math.floor(e / hit * k));   // a short wait: the run-in shares it evenly
+    if (e >= start) return Math.min(k - 1, Math.floor((e - start) / F));
+    return pp(0, Math.min(2, k - 1), e);   // a long wait: the first wind-up frames rock from frame 0, then the run-in starts over from frame 0
+  }
+  const q = e - hit, tail = n - 1 - k;
+  if (q < (tail + 1) * F) return Math.min(n - 1, k + Math.floor(q / F));   // the blow, then the follow-through
+  const lo = Math.max(k, n - 4);                    // still casting: the closing frames rock (from the last one back)
+  return pp(lo, n - 1, q - (tail + 1) * F + (n - 1 - lo) * F);
+}
+// v0.30.1884 grav-smooth-anim - not moving: a walk frame stood for up to 3 s while he pressed into the hero or a wall (his walk is paced by the distance
+// covered, and the walk latch reads his speed). Standing still for 250 ms draws his idle instead.
+function _lxGravStill(m) {
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  if (m._gsX == null || Math.abs(m.x - m._gsX) > 1.5) { m._gsX = m.x; m._gsMovedAt = now; }
+  return now - (m._gsMovedAt || now) > 250;
 }
 function _gravitosOnceFrame(m, key) {
   const frames = BOSS_ATTACK_FRAMES[key];
@@ -161291,9 +161323,8 @@ function _gravitosOnceFrame(m, key) {
   // proportions and the rest the window after (was: spread evenly across the window, the blow landing after the release in
   // every pattern, and 3.8 s before a Singularity resolved)
   const _hit = _gravOnceHitMs(m), _oft = (_hit != null && n > 1) ? _lxCalibFt(key, 'attack') : null;
-  if (_oft) { const _f = _gravTeleMs(m, 1) || 1; return frames[_lxKeyedIdx(n, _oft, _lxBossKeyFrame(key, n, _oft), (m.patternTimer || 0) / _f, _hit / _f, _dur / _f)]; }
-  const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / _dur));
-  return frames[Math.min(n - 1, Math.floor(t * n))];
+  if (_oft) { const _f = _gravTeleMs(m, 1) || 1; return frames[_lxGravSmoothIdx(n, _lxBossKeyFrame(key, n, _oft), (m.patternTimer || 0) / _f, _hit / _f)]; }   // v0.30.1884 grav-smooth-anim
+  { const _f = _gravTeleMs(m, 1) || 1; return frames[_lxGravSmoothIdx(n, Math.floor(n * 0.6), (m.patternTimer || 0) / _f, (_hit != null ? _hit : _dur * 0.6) / _f)]; }   // v0.30.1884 grav-smooth-anim - no authored timing
 }
 // v0.30.1363 key-frame - when each Gravitos pattern drawn by _gravitosOnceFrame acts, on its pattern clock (the AI's own thresholds): the wave
 // fires past 400, the four ring / comet / hole / decay casts past _gravTeleMs(350), a Singularity resolves when its hazard's
@@ -166596,7 +166627,7 @@ function drawMonster(m) {
   const _bossDuckImg = _bossDucking ? _bossDuckFrame(_bodyKey, m) : null;
   // v0.26.314/322 — when not attacking: walk loop while moving, else idle loop,
   // else the static sprite.
-  const _bossWalking = !_bossAttacking && !_bossWeaveImg && !_bossDuckImg && _bossMoving(m);
+  const _bossWalking = !_bossAttacking && !_bossWeaveImg && !_bossDuckImg && _bossMoving(m) && !(m.type === 'gravitos' && _lxGravStill(m));   // v0.30.1884 grav-smooth-anim - standing still is idle
   const _bossWalkImg = _bossWalking ? _bossWalkFrame(_bodyKey, m) : null;
   const _bossIdleImg = (!_bossAttacking && !_bossWalking && !_bossWeaveImg && !_bossDuckImg) ? _bossIdleFrame(_bodyKey, m) : null;
   // v0.29.367 — the _dreamPhase "alpha-fade" flag was WRITE-ONLY: six sites

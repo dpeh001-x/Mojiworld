@@ -151,7 +151,7 @@ const p = out.progression || [];
 const early = p.find((x) => x.ms === 0), mid = p.find((x) => x.ms === 950), late = p.find((x) => x.ms === 20000);
 ck(early && early.frame === 0, 'starts on frame 0', early);
 ck(mid && mid.frame > 0 && mid.frame < 8, 'is mid-sequence halfway through', mid);
-ck(late && late.frame === 8, 'holds the LAST frame long past the window (no slow-motion crawl)', late);
+ck(late && late.frame >= 5 && late.frame <= 8, 'keeps moving long past the window - the closing frames rock instead of freezing on the last one (per user: casts must not freeze)', late);
 console.log('  ' + p.map((x) => `${x.ms}ms:f${x.frame}`).join('  '));
 
 ck(!failed.length, 'no failed gravitossoul requests', failed);
