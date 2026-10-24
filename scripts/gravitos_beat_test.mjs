@@ -20,8 +20,8 @@ const html = readFileSync(path.join(ROOT, PAGE), 'utf8');
 const gate = (html.match(/gravitos_gate: \{[\s\S]*?\n  \},/) || [''])[0];
 checks.push(['the gate beat is found', gate.length > 200]);
 // the register (per user: Nyx, Persona 3) and the tells, all oblique: nothing names the hand
-checks.push(['he is the shape a wish took (called, not choosing)', /I am the shape that asking took\./.test(gate)]);
-checks.push(['whether the sky or something above it chose him, he has never needed to know', /or something above the sky, I have never needed to know\./.test(gate)]);
+checks.push(['he is the stillness the world asked for (called, not choosing; v0.30.1889 simpler wording)', /Every voice begged the sky for stillness\.\\n\\nI am that stillness\./.test(gate)]);
+checks.push(['whether the sky or something above it chose him, he has never needed to know', /Whether the sky made me, or something above it\.\.\. I have never needed to know\./.test(gate)]);
 checks.push(['he is what every heart fears most and turns from', /What every heart in this world fears most\.\.\. what it turns from, and calls morning\. I am that\./.test(gate)]);
 checks.push(['the weight was placed on him; he carries it', /The weight was placed\. I carry it\./.test(gate)]);
 checks.push(['he hears the word spoken above him, and says so himself', /Be still\.\.\. Did you hear that\? No\. You would not\. Something has spoken, far above the Singularity\.\.\. and I am always the last to hear it\./.test(gate)]);
