@@ -16488,7 +16488,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1889';
+const GAME_VERSION = 'v0.30.1890';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -91665,6 +91665,7 @@ function tryStartClassCharge(slotKey) {
   const found = skillBySlot(slot);
   if (!found || !isReady(found.id)) return false;
   if (_LX_NO_CHARGE_SKILLS.has(found.id)) return false;   // v0.29.5xx — casts instantly instead
+  if (_lxCastRefusedNow(found.id)) return false;   // v0.30.1890 release30a: silenced / locked / capped - no draw, no root; the poll's castSkill gives the one notice
   if (player.hp <= 0 || game.paused || game.dying > 0) return false;
   if (((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god) (player._lxCcEaten || (player._lxCcEaten = {}))[slotKey] = true;   // v0.30.1739 release13: a frozen / shackled press is spent too
   if (((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god) return false;  // frozen / shackle-QTE: no voluntary action (poll-loop gate doesn't cover charge)
@@ -91728,6 +91729,7 @@ function tryReleaseClassCharge(slotKey) {
     castSkill(c.skillId);
     return true;
   }
+  if (_lxCastRefusedNow(c.skillId)) { player._releasedCharge = null; castSkill(c.skillId); return true; }   // v0.30.1890 release30a: silenced mid-draw - the refusal, no FULL DRAW
   player._releasedCharge = power;
   if (power >= 1) {
     addShake(10); flash(0.25); addHitStop(50);
@@ -92272,16 +92274,23 @@ function castSkill(id) {
     game._lastFailToast = msg; game._lastFailToastAt = now;
     showToast(msg, 'common');
   };
+  // v0.30.1890 release30a - a REFUSED press (silence, a lock, a full cap) buzzes at most once a second: a held key re-asks every frame, and the
+  // 120 ms buzzer gate above let it sound eight times a second.
+  const _refuseCue = () => {
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    if (now - (game._lxRefuseCueAt || 0) < 1000) return;
+    game._lxRefuseCueAt = now; _failCue();
+  };
   // v0.25.485 — Skill-lock debuff (octopus boss "Skill Lock" tentacle).
   // Silences active skill use for the duration; basic attacks (slot 'd')
   // are still allowed so the player isn't completely defenseless.
   if (player._skillLockTimer > 0 && s.slot !== 'd') {
-    _failToast('🔒 Skills locked!'); _failCue();
+    _failToast('🔒 Skills locked!'); _refuseCue();
     return;
   }
   // Tower: Basic Attacks Only modifier — block all non-'d' skills
   if (towerBasicOnly() && s.slot !== 'd') {
-    _failToast('🚇 Basic attacks only!'); _failCue();
+    _failToast('🚇 Basic attacks only!'); _refuseCue();
     return;
   }
   // v0.25.582 — Map-level skill lock. Frozen Peak (and any future
@@ -92289,7 +92298,7 @@ function castSkill(id) {
   // (Z basic attack), so combat is reduced to simple Z-tap timing while
   // the player navigates the climb.
   if (game.mapData && game.mapData.skillLockExceptZ && s.slot !== 'd') {
-    _failToast('❄ Only Z attacks here!'); _failCue();
+    _failToast('❄ Only Z attacks here!'); _refuseCue();
     return;
   }
   // Stamp current basic-skill enhancement for any effect this cast triggers
@@ -92314,6 +92323,9 @@ function castSkill(id) {
   if (id === 'elementalist_ult' && (player._apoCharges | 0) > 0) cost = 0;
   cost = _lxPressMpCost(id, cost);   // v0.30.1518 skill-desc - same price as isReady judged (_lxPressMpCost)
   if (player.mp < cost) { _failCue(); return; }
+  // v0.30.1890 release30a - a summon at its cap refuses HERE, before the cooldown, MP, pose, sound, save and flourish below: nothing plays, the
+  // hero is not frozen, and the notice keeps its own 2.5 s throttle (_lxSummonCapToast).
+  { const _capFull = _lxSummonCapRefuses(id); if (_capFull) { _lxSummonCapToast(_capFull); _refuseCue(); return; } }
   // v0.26.223 — Defense-in-depth reorder. Pre-fix the order was:
   //   1. MP check (L32017)
   //   2. MP deduct (was here)
@@ -92647,9 +92659,8 @@ function castSkill(id) {
   player.state = 'attack';
   // Cinematic flourish for master-tier skills (3rd advancement)
   // v0.30.x — inside a Deadeye / Protocol window the flourish would freeze the sim 140 ms and strobe on every press (every 250-420 ms); it belongs to the opening press.
-  if (s.master && (!_dew || _deOpened)) {
-    masterSkillFlourish(player.x + player.w/2, player.y + player.h/2, player.facing);
-  }
+  // v0.30.1890 release30a - played after the SKILL_FN (below), and not for a cast that no-op'd and was refunded
+  const _lxFlourishDue = !!(s.master && (!_dew || _deOpened));
   // Shadowlord clones no longer mimic — they act autonomously now
   // (see _clones tick in updatePlayer). Nothing to queue here.
   // Class identity: compute the per-cast damage multiplier (warrior charge,
@@ -92666,6 +92677,7 @@ function castSkill(id) {
   // refund the cd + MP committed above so the cast isn't silently wasted.
   // v0.30.854 - rank attribution: hits landed by this code are this skill's, and so are the projectiles / hazards it creates
   const _rsPrev = _lxRankSrc, _rsP0 = game.projectiles.length, _rsH0 = game.hazards ? game.hazards.length : 0;
+  const _lxArm0 = id === 'crusader_ult' && (player._bastionArmedUntil | 0) > game.time;   // v0.30.1890 release30a: a Bastion ARM is a no-op that keeps its flourish
   let _castNoOp = false; _lxRankSrc = id;
   try {
     if (id === 'arrowShot' && f && typeof HV_ARCHER_RELEASE_MS === 'number') {   // v0.30.1395 - _lxArrowSync: the arrow leaves on the drawn release
@@ -92682,6 +92694,10 @@ function castSkill(id) {
   }
   finally { _lxRankSrc = _rsPrev; _lxRankStampNew(game.projectiles, _rsP0, id); _lxRankStampNew(game.hazards, _rsH0, id); }
   if (_castNoOp) { player.skillCooldowns[id] = _preCastCd; player.mp = _preCastMp; }
+  // v0.30.1890 release30a - the master flourish (moved from above): a refunded no-op shows nothing, except the press that ARMED a Bastion
+  if (_lxFlourishDue && (!_castNoOp || (id === 'crusader_ult' && !_lxArm0 && (player._bastionArmedUntil | 0) > game.time))) {
+    masterSkillFlourish(player.x + player.w/2, player.y + player.h/2, player.facing);
+  }
   // v0.29.362 — DOPPEL CAST (Tier-1). A successful cast has a chance to fire
   // a second time 200 ms later, free of MP and cooldown. Guard rails:
   //   • slot 'd' excluded — doubling basics is a flat DPS multiplier on
@@ -94155,6 +94171,25 @@ function _lxSummonCapToast(cap) {
   if (now - _lxSummonCapToastAt < LX_SUMMON_CAP_TOAST_MS) return;
   _lxSummonCapToastAt = now;
   if (typeof showToast === 'function') showToast('Summon cap (' + cap + ') reached', 'rare');
+}
+// v0.30.1890 release30a - THE CAP, ASKED FIRST (player report: a white orb at every G press with five wolves out). The two wolf summons refuse inside
+// their SKILL_FN ('_lxNoCast'), which castSkill reaches only after the attack pose, the cast sound, a save, a Quickening roll and the master
+// flourish (flash, 140 ms hit-stop, white rings) - and the refund leaves the key ready, so a held key replayed all of it every frame.
+// Same count as wildBond / beastmaster_pack below: pet + apex werewolf + pack against the shared cap of 5. Returns the cap when full, else 0.
+function _lxSummonCapRefuses(id) {
+  if (id !== 'wildBond' && id !== 'beastmaster_pack') return 0;
+  const CAP = 5;
+  const n = (player.pet ? 1 : 0) + (player.ultPet ? 1 : 0) + ((player.pack && player.pack.length) || 0);
+  return n >= CAP ? CAP : 0;
+}
+// v0.30.1890 release30a - would castSkill refuse this skill before paying (silence, Basic Attacks Only, a map that allows only Z, a full summon cap)?
+// The Warrior / Archer hold asks it so a refused press never draws, roots or plays FULL DRAW.
+function _lxCastRefusedNow(id) {
+  const s = SKILLS[id]; if (!s || s.slot === 'd') return false;
+  if ((player._skillLockTimer || 0) > 0) return true;
+  if (typeof towerBasicOnly === 'function' && towerBasicOnly()) return true;
+  if (game.mapData && game.mapData.skillLockExceptZ) return true;
+  return _lxSummonCapRefuses(id) > 0;
 }
 function _lxSummonHp() {
   const _base = (typeof getMaxHp === 'function') ? getMaxHp()
@@ -114688,7 +114723,7 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
       if (isCrit && !m.flies && m.currentHp > 0) m.vy = Math.min(m.vy || 0, -Math.min(3.5, 1.5 + _kbFrac * 4));
     }
     // Impact flash — thin on basics, thicker on crits
-    if (!_lxAllyHit) flash(isCrit ? 0.35 : 0.1);
+    if (!_lxAllyHit && !_deLine) flash(isCrit ? 0.35 : 0.1);   // v0.30.1890 release30a: a Deadeye / Protocol line (always a crit) flashed 0.35 on each of its 3-7 lines a press
     // v0.25.171 — frame-coalesce the hit audio so AoE skills that
     // strike many mobs in one tick don't fire 10+ overlapping
     // oscillators (clips, expensive on mobile). Only one hit sound
@@ -114716,7 +114751,7 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
       // ramp upstream); only the on-screen toast is silenced.
       // flash() is kept since it's a brief visual pop, not a
       // notification that competes for screen space with other toasts.
-      if (game.critStreak === 3) {
+      if (game.critStreak === 3 && !_deLine) {   // v0.30.1890 release30a: nor the streak flash
         flash(0.35);
       }
     }
