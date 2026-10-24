@@ -16488,7 +16488,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1884';
+const GAME_VERSION = 'v0.30.1885';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -61753,6 +61753,7 @@ _COOP_MON_CORE.ar = 1; _COOP_MON_CORE.sn = 1;   // bughunt coop-mirror - ar: the
 const _COOP_MON_EX = { iv: 1, aa: 1, fz: 1, st: 1, wd: 1, wg: 1, wb: 1, ps: 1, sp: 1, dp: 1, p: 1, sg: 1, op: 1, bk: 1, cs: 1, sf: 1, tw: 1, qb: 1, ib: 1, gh: 1, lo: 1, fb: 1, pm: 1 };   // bughunt coop-mirror: ib burrow, gh ghost step, lo libra pan, fb Taurus planted, pm host-only damage-taken product (ar / sn ride _COOP_MON_CORE)   // v0.30.x grav-tp: tw; qb: a Ticket Rush mech's booking (the landed-fix marker pins the OPENING literal, so new keys go on the end)
 _COOP_MON_EX.tg = 1;   // v0.30.1740 coop-guest (bughunt H17-1): a boss's windup, so a guest draws its warning (see _lxCoopTgOf; a line of its own, the table's literal is left alone)
 _COOP_MON_EX.rf = 1; _COOP_MON_CORE.gb = 1;   // v0.30.1742 release14: rf the one-way boss flags (every frame it is set), gb Gravitos's base stats (keyframes) - see _lxCoopFormSync
+_COOP_MON_EX.wr = 1;   // fix-guest-dome-ref - wr: the ward dome's box [size, ox, oy] while a boss is warded / shattering (see _lxWardNetOf; a line of its own, the table's literal is left alone)
 _COOP_MON_EX.og = 1;   // fix-mirror-ground - og: a grounded boss (see _coopTickMonsters; every frame it is set, absent = airborne)
 function _coopDeltaOn() {   // at least one partner on my map, and every one of them reads light frames
   if (!_coopActive()) return false;
@@ -62306,6 +62307,7 @@ function _coopTickMonsters() {
     if (m._libraOrb) _e.lo = (m._libraOrbActive === false) ? 2 : 1;
     if (m._artKey) _e.ar = String(m._artKey).slice(0, 24);
     if (m.isBoss && m.onGround) _e.og = 1;   // fix-mirror-ground - a grounded boss: a mirror runs no physics, so its onGround sat at spawn's false for ever (Leo's zodiac anim plays its pounce set on !onGround, so the guest saw his leap loop through every idle and the ward dome measured it)
+    if (m.isBoss) { const _wr = _lxWardNetOf(m); if (_wr) _e.wr = _wr; }   // fix-guest-dome-ref - the dome the host draws, so the guest draws the same one (see _lxWardBox)
     if (m.isShiny) _e.sn = 1;
     // bughunt boss-3 - what a guest needs to PREDICT the host's judgement (the host still applies every one of them): fb - Taurus planted, so the
     // guest's own hitMonster deflects a front hit like solo; pm - the product of the host-only damage-taken multipliers (the Sovereign's Regalia /
@@ -64098,6 +64100,7 @@ function _coopApplyMonsters(msg) {
     else if ((m._wardUntil | 0) > (game.time | 0)) m._wardUntil = game.time | 0;                              // the host is not warded: drop a stale local ward
     m._wardGauge = (e.wg > 0) ? Math.min(1, (+e.wg | 0) / 100) : 0;   // v0.30.395 — mirror the host's gauge
     if (e.wb > 0) { if (!((m._wardBreakUntil | 0) > (game.time | 0))) m._wardBreakAt = game.time | 0; m._wardBreakUntil = (game.time | 0) + Math.min(600, +e.wb | 0); }   // and its open window   // v0.30.390 — mirror the host's ward
+    if (m.isBoss && Array.isArray(e.wr) && e.wr.length === 3 && e.wr.every((v) => Number.isFinite(+v) && Math.abs(+v) < 4000) && +e.wr[0] > 0) m._lxWardNet = { size: Math.min(560, +e.wr[0]), ox: +e.wr[1], oy: +e.wr[2], t: game.time | 0 };   // fix-guest-dome-ref - held for a while: a light frame that did not change carries no wr
     m.patternState = e.ps ? String(e.ps).slice(0, 20) : 'idle';
     if (e.sp) m._phaseSprite = String(e.sp).slice(0, 20);
     // v0.30.1736 bughunt7 - the arena falls on a guest too: _lxGravCollapse ran only in the host's killMonster, so a guest kept the y 180 / 320 shelves
@@ -166029,7 +166032,23 @@ function _lxWardRefUpdate(m, sx, sy) {
   const b = _lxWardBoxLive(m, sx, sy), fx = sx + (m.w || 0) / 2, fy = sy + (m.h || 0);
   m._lxWardRef = { key: m._phaseSprite || m.type, size: b.size, ox: (b.cx - fx) * (r.flip ? -1 : 1), oy: b.cy - fy };
 }
+// fix-guest-dome-ref - a guest measured its OWN dome: its ref came from its own idle frame 0, which a mirror reaches at other moments than the host (Virgo hovers, Barnaby never stands still), so the
+// side without one drew the live pose measure (Virgo 449..339, Barnaby 290..233) while the other held a constant. The host now sends the box it draws (a ward / shatter frame only) and a mirror draws that.
+function _lxWardNetOf(m) {   // host: the dome box as an offset from the feet (absolute, so no flip maths on the guest), or null
+  const t = game.time | 0;
+  if (!((m._wardUntil | 0) > t) && !(typeof _lxWardBreakActive === 'function' && _lxWardBreakActive(m))) return null;
+  const R = m._lxWardRef, S = m._lxWardOut, r1 = (v) => Math.round(v * 10) / 10;
+  if (R && R.key === (m._phaseSprite || m.type)) return [r1(R.size), r1(_lxBossFlipNow(m) ? -R.ox : R.ox), r1(R.oy)];
+  return (S && t - S.t <= 60) ? [r1(S.size), r1(S.ox), r1(S.oy)] : null;   // no idle frame 0 yet: the live box last drawn
+}
+function _lxWardOutNote(m, wb, sx, sy) {   // host, in the dome's draw: remember the box for _lxWardNetOf (co-op only; solo never reads it)
+  if (!net.isHost || !_coopActive()) return;
+  const o = m._lxWardOut || (m._lxWardOut = { t: 0, size: 0, ox: 0, oy: 0 });
+  o.t = game.time | 0; o.size = wb.size; o.ox = wb.cx - (sx + (m.w || 0) / 2); o.oy = wb.cy - (sy + (m.h || 0));
+}
 function _lxWardBox(m, sx, sy) {
+  const N = m._lxWardNet;   // fix-guest-dome-ref - a mirror draws the host's box while the host keeps sending it (a ward sends every tick)
+  if (N && m._coopMirror && ((game.time | 0) - N.t) <= 90) return { cx: sx + (m.w || 0) / 2 + N.ox, cy: sy + (m.h || 0) + N.oy, size: N.size };
   const R = m._lxWardRef;
   if (R && R.key === (m._phaseSprite || m.type)) return { cx: sx + (m.w || 0) / 2 + (_lxBossFlipNow(m) ? -R.ox : R.ox), cy: sy + (m.h || 0) + R.oy, size: R.size };
   return _lxWardBoxLive(m, sx, sy);   // no idle frame drawn yet (or a procedural boss): the live measure, as before
@@ -166047,6 +166066,7 @@ function _drawBossWardShield(m, sx, sy) {
   // v0.30.390 — centre and size on the sprite actually drawn this frame when the sprite path recorded it; the box otherwise
   const _wb = _lxWardBox(m, sx, sy);   // v0.30.1513 arbiter - the body, not the canvas
   const size = _wb.size, cx = _wb.cx, cy = _wb.cy;
+  _lxWardOutNote(m, _wb, sx, sy);   // fix-guest-dome-ref
   ctx.save();
   ctx.globalAlpha = 0.55 * fade * pulse;
   ctx.drawImage(_lxPinned(img), cx - size / 2, cy - size / 2, size, size);   // v0.30.405 — pinned
@@ -166063,6 +166083,7 @@ function _drawBossWardShield(m, sx, sy) {
 function _drawBossWardBreak(m, sx, sy) {
   const t = game.time | 0, age = t - (m._wardBreakAt | 0);
   const _wb = _lxWardBox(m, sx, sy), cx = _wb.cx, cy = _wb.cy, size = _wb.size;   // v0.30.1513 arbiter - the shatter flies from the shield it was
+  _lxWardOutNote(m, _wb, sx, sy);   // fix-guest-dome-ref
   const img = (typeof LX_FX !== 'undefined' && LX_FX) ? LX_FX.boss_shield : null;
   ctx.save();
   if (img && img.complete && img.naturalWidth && age >= 0 && age < 26) {
